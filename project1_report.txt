@@ -1,0 +1,116 @@
+1. Basic information
+Student ID : 73324471, 32085120
+Student Name : Sadeem Al Sudais, Sashidhar Jakkamsetti
+OS (bit) : Mac 64 bit, Mac 64 bit
+gcc version : 4.2.1, 4.2.1
+
+
+2. Internal Record Format
+-------------------------
+
+			Record Format
+~First two bytes is for number of fields.
+
+~followed by field pointers where each field pointer(2 bytes) points to the end of the field.
+If a field value is null its offset would point to the same as previous field end.
+This guarantees the O(1) field access because no need to scan all the record,
+can access the specific field using the field offset(which points to end of the field) subtracting the previous field pointer which points to previous field's end. 
+
+~followed by the field values(variable bytes depending on the field values types)
+
+The reason for the number of bytes allocation is explained below in section 4.
+
+	Example:
+	n p1 p2 p3 v1 v2 v3
+	where n: number of fields
+		  p1: pointer to end of v1
+		  p2: pointer to end of v2
+		  p3: pointer to end of v3
+		  
+			Varchar handling
+The data sent from application has the varchar length(int 4 bytes) sent before the varchar value.
+So we take this length to read the field value according the the sent length.
+As explained above, this value is stored with its corresponding field end pointer in the field pointers section of the record.
+
+3. Page Format
+-------------------------
+
+			Page Format
+The beginning of the page contains the records, and the end of the page has the page directory explained below.
+The middle of the page is empty and both page directory and records grow to meet in the middle filling a page.			
+
+			Page Directory Format
+Last two bytes for the page free space
+preceded by two bytes for number of records
+preceded by four bytes for the RID(slot size and slot length) where each record has an RID to get the record by its offset and the record length to read it in O(1)
+
+The reason for the number of bytes allocation is explained below in section 4.
+
+4. Implementation Detail
+-------------------------
+			Variables Bytes Size
+							
+							RECORD_NUMBER_OF_FIELD_SIZE = 2 bytes.
+		Because maximum number of fields is a record where each field is AT LEAST 1 byte.
+		
+		Bellow explanation of the calculation on how the number was reached 
+
+Staring from 4096 bytes, we subtract the below
+		-	  1   byte(PAGE_FREE_SPACE_SIZE, because free space is ALMOST 0 because of the huge number of fields in the record) and small number such as 0 is translated to 00000000 bits = 1byte
+		-	  1   byte(PAGE_NUMBER_OF_RECORDS_SIZE, because there is only one record having many fields in the file) and small number such as 0 is translated to 00000000 bits = 1byte
+		-	  2   byte(RECORD_FIELD_POINTER_SIZE, because there are many fields pointed at) and many fields could actually be as much as the page size ~ 4000 which is 0000111110100000 = 2bytes
+		-	  1   byte(SLOT_OFFSET_SIZE, because there will be only one record and its pointer is relatively small number indicating the beginning of the file)
+		-	  2   byte(SLOT_LENGTH_SIZE, length of the record would be huge ALMOST taking the whole page)
+		----------
+			~4089 = 0000111111111001 2 bytes
+			
+SIMILARLY, BELOW ATTRIBUTES ARE CALCULATED. BELOW IS A BREIEF DESCRIPTION OF EACH. 
+
+PAGE_FREE_SPACE_SIZE = 2 bytes. Because maximum free space is ALMOST all the page excluding the directory size. ~4096 = 0001000000000000 which is 2 bytes
+PAGE_NUMBER_OF_RECORDS_SIZE = 2 bytes. Because maximum number of records when each record could have only one field and each field is AT LEAST 1 byte excluding the offsets and the directory size.  
+SLOT_OFFSET_SIZE = 2 bytes. Because there could be many records and pointer to the record could be at the end of the page.
+SLOT_LENGTH_SIZE = 2 bytes. Because there could be one long record so its length might be ALMOST the size of the page.
+RECORD_FIELD_POINTER_SIZE = 2 bytes. Because there might be one record only in the page having many fields. So the last field slot points to the last field almost at the end of the file.
+
+			Functions Description:
+		
+					Class
+	PFM
+a)isPageFree
+		It determines if a page is free or not.
+		It seeks the file to its end minus two bytes for the value of PAGE_FREE_SPACE_SIZE
+		Reads the PAGE_FREE_SPACE_SIZE value and determines if the given record length fits or not.
+
+b)updateMetaPage
+		When the file is created(createFile), we create an empty page filled with 0s.
+		Whenever the file is closed(closeFile), updateMetaPage function is called to dow the below
+		The metadata page is updated by reading the counters stored in the file(readPage) and adding the current counters from the FileHandler.
+		Then the page is written(writePage) again to reflect the changes.
+
+	RecordManager
+a) understandData: 
+		parses the incoming data and assigns the corresponding data values to the RecordManager object.
+		We know the incoming data format as explained in the project description.
+		
+b) createRecord: 
+		reformats the record as explained in section 2 above before inserting it to the page. 
+		It takes the record values from the RecordManager object.
+		
+c) understandRecord:
+		it parses the data read from the page and assign the record values to the RecordManager object
+		
+d) createData:	
+		takes the values from the RecordManager object and formats it back to initial data format which was passed from the above layer(application call).
+
+	RBFM
+a) insertRecord:
+		first checks the last page for free space to store the record by calling the isPageFree function,
+		if the last page doesn't have enough space, the function scans the file from the beginning looking for page which has enough space
+		If all pages are not enough to store the record, we append a new page at the end of the file and store the record.
+		Lastly we update the page directory.
+		
+5. Other (optional)
+-------------------------
+References:
+-CS222 slides
+-Online resources about C/C++

@@ -1,0 +1,94 @@
+1. Basic information
+Team number: 36
+#1 Student ID : 73324471
+#1 Student Name : Sadeem Al Sudais
+#2 Student ID : 32085120
+#2 Student Name : Sashidhar Jakkamsetti
+OS (bit) : Mac 64 bit, Ubuntu
+gcc version : 4.2.1, 5.4.0
+
+
+2. Meta-data
+-------------------------
+
+Each file is a table. Each table is stored in one file.
+We have two files for catalog management.
+Tables.sys.tbl : for storing all the existing tables in the database including itself with 1 as it's tableId.
+Columns.sys.tbl: for storing the column information of the tables which are stored in Tables.sys.tbl 
+including it's own column info. This file's tableId is 2.
+
+3. Internal Record Format
+-------------------------
+
+			Record Format(record in page)
+~First two bytes is for number of fields. 
+
+~followed by null indicator(which is passed by the data, its size is ciel(number of fields/8)
+
+~followed by field pointers where each field pointer(2 bytes) points to the end of the field.
+This guarantees the O(1) field access because no need to scan all the record,
+can access the specific field using the field offset.
+
+~followed by the field values(variable bytes depending on the field values types)
+
+			Record Format(record NOT in page)
+~First two bytes is for number of fields. If record is not in file due to an update, then the number of fields is -1.
+
+~followed by two bytes for the new page number of the record where it actually resides.
+
+~followed by two bytes for the new slot number of the record where it actually resides.
+	  
+			Varchar handling
+The data sent from application has the varchar length(int 4 bytes) sent before the varchar value.
+So we take this length to read the field value according to the sent length.
+
+
+4. Page Format
+-------------------------
+
+			Page Format
+The beginning of the page contains the records, and the end of the page has the page directory explained below.
+The middle of the page is empty and both page directory and records grow to meet in the middle filling a page.			
+
+			Page Directory Format
+-Last two bytes for the page free space
+-preceded by two bytes for number of records
+-preceded by two bytes for the number of slots to check if a slot is empty to be occupied by the next insert operation.
+-preceded by four bytes for the RID(slot size and slot length) where each record has an RID to get the record by its 
+ offset and the record length to read it in O(1)
+
+			Handling Delete
+a) locate the record from RID, if not in file due to previous update, then locate its new updated RID.
+b) delete the record by shifting all following records to left to occupy free space.
+c) set its slot offset to -1. So its slot can be used in next insertion.
+						
+			Handling Update
+a) locate the record from RID, if not in file due to previous update, then locate its new updated RID.
+b) if new record length is shorter than original record length, then shift all following records to the
+   left to fill up the space difference between the old record and new.
+c) if new record length is larger than old record length, then check the last two bytes in page to 
+   determine if the page fits the new record. 
+   #IF it fits, the shift all the following records to the 
+   right to allow the new record to insert the extra bytes in its original position.
+   #IF the page doesn't fit the extra record length, then locate another page which fits the new record and
+   get its new RID after insertion and place the RID in the original record to indicate it has been moved 
+   to another page. Finally shift all following records to the left to utilize the free space after the 
+   updated record has been moved to another page.
+			
+5. File Format
+-------------------------
+First page is for storing the counters(metapage), then the pages would contain records of the specific schema of the table.
+
+6. Implementation Detail
+-------------------------
+
+			Functions Description:
+	RBFM
+a) insertRecord:
+		first checks the last page for free space to store the record by calling the isPageFree function,
+		if the last page doesn't have enough space, the function scans the file from the beginning looking for page which has enough space
+		If all pages are not enough to store the record, we append a new page at the end of the file and store the record.
+		Once page is chosen, we check for a free slot to be used by looping through all the slots.
+		Lastly we update the page directory.
+
+7. Other (optional)
